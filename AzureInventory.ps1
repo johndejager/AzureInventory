@@ -131,16 +131,21 @@ foreach ($subscription in $subscriptions) {
     $virtualmachines = Get-AzureRMVM -Status
     foreach ($virtualmachine in $virtualmachines) {
         $vnics = Get-AzureRmNetworkInterface |Where-Object {$_.Id -eq $VirtualMachine.NetworkProfile.NetworkInterfaces.Id} 
+        $vmSize = Get-AzureRmVMSize -Location $virtualmachine.Location | Where-Object {$_.Name -eq $virtualmachine.HardwareProfile.VmSize}
         $virtualmachinesObject = [pscustomobject][Ordered]@{
-            Subscription  = $subscription.Name        
-            Name          = $virtualmachine.Name
-            ResourceGroup = $virtualmachine.ResourceGroupName
-            Size          = $virtualmachine.HardwareProfile.VmSize
-            OSDisk        = $virtualmachine.StorageProfile.OsDisk.Name
-            DataDisk      = $virtualmachine.StorageProfile.DataDisks.Name -join "**"
-            PowerState    = $virtualmachine.PowerState
-            Vnic          = $vnics.Name
-            VnicIP        = $Vnics.IpConfigurations.PrivateIpAddress
+            Subscription     = $subscription.Name        
+            Name             = $virtualmachine.Name
+            ResourceGroup    = $virtualmachine.ResourceGroupName
+            Size             = $virtualmachine.HardwareProfile.VmSize
+            NumberOfCores    = $vmSize.NumberOfCores
+            MemoryInMB       = $vmSize.MemoryInMB
+            MaxDataDiskCount = $vmSize.MaxDataDiskCount
+            OSDisk           = $virtualmachine.StorageProfile.OsDisk.Name
+            DataDisk         = $virtualmachine.StorageProfile.DataDisks.Name -join "**"
+            PowerState       = $virtualmachine.PowerState
+            Location         = $virtualmachine.Location
+            Vnic             = $vnics.Name
+            VnicIP           = $Vnics.IpConfigurations.PrivateIpAddress
         }
         $virtualmachinesCol += $virtualmachinesObject
     }

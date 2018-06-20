@@ -40,23 +40,15 @@ Function ConvertCSV-ToExcel {
         $excel.Visible = $False
         #Add workbook
         $workbook = $excel.workbooks.Add()
-        #Remove other worksheets
-        #$workbook.worksheets.Item(2).delete()
-        #After the first worksheet is removed,the next one takes its place
-        #$workbook.worksheets.Item(2).delete()
         #Define initial worksheet number
         $i = 1
     }
     Process {
         ForEach ($csvfile in $csvFiles) {
-            #$csvfile = $csvfiles[0]
-            #$csvfile = $csvfiles[1]
             #If more than one file, create another worksheet for each file
             If ($i -gt 1) {
                 $workbook.worksheets.Add() | Out-Null
             }
-            # Use the first worksheet in the workbook (also the newest created worksheet is always 1)
-            # Add name of CSV as worksheet name
             $delimiter = "," #Specify the delimiter used in the file
             # Create a new Excel workbook with one empty sheet
             $excel = New-Object -ComObject excel.application 
@@ -84,14 +76,17 @@ Function ConvertCSV-ToExcel {
         Write-Host -Fore Green “File saved to $xlsx”
         #Close Excel
         $excel.quit()
+        Stop-Process -Name "Excel*"
     }
 }
 # Get Subscriptions
 $subscriptions = Get-AzureRmSubscription 
-#Resource Groups
+$subscriptions = Get-AzureRmSubscription -SubscriptionId 'ebe731f6-78dd-478b-ae32-d149303f3222' #GenericInfra
+
 $resGroupsCol = @()
 $vnetsCol = @()
 $virtualmachinesCol = @()
+$disksCol = @()
 foreach ($subscription in $subscriptions) {
     Write-Host 'Now processing Resource Groups for subscription:'$subscription.Name''
     Select-AzureRmSubscription -Subscription $subscription.Name
@@ -149,6 +144,20 @@ foreach ($subscription in $subscriptions) {
         }
         $virtualmachinesCol += $virtualmachinesObject
     }
+    Write-Host 'Now processing Disks for subscription:'$subscription.Name''
+    $disks = Get-AzureRmDisk 
+    foreach ($disk in $disks) {
+        $disksObject = [pscustomobject][Ordered]@{
+            Subscription     = $subscription.Name        
+            Name             = $disk.Name
+            ResourceGroup    = $disk.ResourceGroupName
+            Size             = $disk.DiskSizeGB
+            Sku              = $disk.Sku.Name
+            Tier             = $disk.Sku.Tier
+            VirtualMachine   = ($disk.ManagedBy -split '/')[-1]
+        }
+        $disksCol += $disksObject
+    }    
 }
 
 $resGroupsPath = $Directory + "\ResourceGroups.csv"
@@ -157,8 +166,8 @@ $vnetsPath = $Directory + "\VNETs.csv"
 $vnetsCol | Export-Csv $vnetsPath -NoTypeInformation 
 $virtualmachinesPath = $Directory + "\VMs.csv"
 $virtualmachinesCol | Export-Csv $virtualmachinesPath -NoTypeInformation 
+$disksPath = $Directory + "\Disks.csv"
+$disksCol | Export-Csv $disksPath -NoTypeInformation 
 
 
-ConvertCSV-ToExcel -CSVfiles @($resGroupsPath, $vnetsPath, $virtualmachinesPath) -output $xlsx 
-
-
+ConvertCSV-ToExcel -CSVfiles @($resGroupsPath, $vnetsPath, $virtualmachinesPath,$disksPath) -output $xlsx 

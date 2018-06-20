@@ -1,16 +1,9 @@
-$Directory = New-Item C:\AzureInventory -type directory -ErrorAction Continue
+#$Directory = New-Item C:\AzureInventory -type directory -ErrorAction Continue
 $Directory = 'C:\AzureInventory'
 $xlsx = $Directory + '\AzureInventory.xlsx'
 
-Login-AzureRMAccount
+#Login-AzureRMAccount
 #Functions
-Function Release-Ref ($ref)
- {
- ([System.Runtime.InteropServices.Marshal]::ReleaseComObject(
- [System.__ComObject]$ref) -gt 0)
- [System.GC]::Collect()
- [System.GC]::WaitForPendingFinalizers()
- }
 
 Function ConvertCSV-ToExcel {
     [CmdletBinding(
@@ -91,15 +84,16 @@ Function ConvertCSV-ToExcel {
         Write-Host -Fore Green “File saved to $xlsx”
         #Close Excel
         $excel.quit()
-        $a = Release-Ref($range)
     }
 }
 # Get Subscriptions
 $subscriptions = Get-AzureRmSubscription 
 #Resource Groups
 $resGroupsCol = @()
+$vnetsCol = @()
+$virtualmachinesCol = @()
 foreach ($subscription in $subscriptions) {
-    Write-Host 'Now processing '$subscription.Name''
+    Write-Host 'Now processing Resource Groups for subscription:'$subscription.Name''
     Select-AzureRmSubscription -Subscription $subscription.Name
     $resGroups = Get-AzureRmResourceGroup | Select-Object ResourceGroupName, Location 
     foreach ($resGroup in $resGroups) {
@@ -110,19 +104,11 @@ foreach ($subscription in $subscriptions) {
         }
         $resGroupsCol += $resGroupsObject
     }
-}
-$resGroupsPath = $Directory + "\ResourceGroups.csv"
-$resGroupsCol | Export-Csv $resGroupsPath -NoTypeInformation
-# Virtual Networks
-$vnetsCol = @()
-foreach ($subscription in $subscriptions) {
-    Write-Host 'Now processing '$subscription.Name''
-    Select-AzureRmSubscription -Subscription $subscription.Name
+    Write-Host 'Now processing VNETS for subscription:'$subscription.Name''
     $vnetworks = Get-AzureRmVirtualNetwork
     foreach ($vnetwork in $vnetworks) {
         Write-Host 'Now processing VNET:'$vnetwork.Name''
         $subnets = $vnetwork.Subnets
-        #$subnet = $subnets[0]
         foreach ($subnet in $subnets) {
             $NetworkSecurityGroup = Get-AzureRmNetworkSecurityGroup | Where-Object {$_.Id -eq $subnet.NetworkSecurityGroup.Id}
             $RouteTable = Get-AzureRmRouteTable | Where-Object {$_.Id -eq $subnet.RouteTable.Id}
@@ -141,16 +127,8 @@ foreach ($subscription in $subscriptions) {
         }
       
     }
-    
-}
-$vnetsPath = $Directory + "\VNETs.csv"
-$vnetsCol | Export-Csv $vnetsPath -NoTypeInformation 
-# Virtual Machines
-$virtualmachinesCol = @()
-foreach ($subscription in $subscriptions) {
-    Write-Host 'Now processing '$subscription.Name''
-    Select-AzureRmSubscription -Subscription $subscription.Name
-    $virtualmachines = get-azurermvm -Status
+    Write-Host 'Now processing VMS for subscription:'$subscription.Name''
+    $virtualmachines = Get-AzureRMVM -Status
     foreach ($virtualmachine in $virtualmachines) {
         $vnics = Get-AzureRmNetworkInterface |Where-Object {$_.Id -eq $VirtualMachine.NetworkProfile.NetworkInterfaces.Id} 
         $virtualmachinesObject = [pscustomobject][Ordered]@{
@@ -167,6 +145,11 @@ foreach ($subscription in $subscriptions) {
         $virtualmachinesCol += $virtualmachinesObject
     }
 }
+
+$resGroupsPath = $Directory + "\ResourceGroups.csv"
+$resGroupsCol | Export-Csv $resGroupsPath -NoTypeInformation
+$vnetsPath = $Directory + "\VNETs.csv"
+$vnetsCol | Export-Csv $vnetsPath -NoTypeInformation 
 $virtualmachinesPath = $Directory + "\VMs.csv"
 $virtualmachinesCol | Export-Csv $virtualmachinesPath -NoTypeInformation 
 

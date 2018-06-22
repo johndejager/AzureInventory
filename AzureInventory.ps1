@@ -1,94 +1,21 @@
-#$Directory = New-Item C:\AzureInventory -type directory -ErrorAction Continue
-$Directory = 'C:\AzureInventory'
-$xlsx = $Directory + '\AzureInventory.xlsx'
+$ExcelFile = "C:\AzureInventory\AzureInventory-$(get-date -f yyyy-MM-dd-hh-mm).xlsx"
 
 #Login-AzureRMAccount
-#Functions
+# Requires module - https://github.com/dfinke/ImportExcel
+# Install-Module ImportExcel
 
-Function ConvertCSV-ToExcel {
-    [CmdletBinding(
-        SupportsShouldProcess = $True,
-        ConfirmImpact = ‘low’,
-        DefaultParameterSetName = ‘file’
-    )]
-    Param (
-        [Parameter(
-            ValueFromPipeline = $True,
-            Position = 0,
-            Mandatory = $True,
-            HelpMessage = ”Name of CSV/s to import”)]
-        [ValidateNotNullOrEmpty()]
-        [array]$csvFiles,
-        [Parameter(
-            ValueFromPipeline = $False,
-            Position = 1,
-            Mandatory = $True,
-            HelpMessage = ”Name of excel file output”)]
-        [ValidateNotNullOrEmpty()]
-        [string]$output
-    )
-    Begin {
-        #Configure regular expression to match full path of each file
-        [regex]$regex = “^\w\:\\”
-        #Find the number of CSVs being imported
-        $count = ($csvFiles.count - 1)
-        #Create Excel Com Object
-        $excel = new-object -com excel.application
-        #Disable alerts 
-        $excel.DisplayAlerts = $False
-        #Show Excel application
-        $excel.Visible = $False
-        #Add workbook
-        $workbook = $excel.workbooks.Add()
-        #Define initial worksheet number
-        $i = 1
-    }
-    Process {
-        ForEach ($csvfile in $csvFiles) {
-            #If more than one file, create another worksheet for each file
-            If ($i -gt 1) {
-                $workbook.worksheets.Add() | Out-Null
-            }
-            $delimiter = "," #Specify the delimiter used in the file
-            # Create a new Excel workbook with one empty sheet
-            $excel = New-Object -ComObject excel.application 
-            #$workbook = $excel.Workbooks.Add(1)
-            $worksheet = $workbook.worksheets.Item(1)
-            $worksheet.Name = “$((Get-ChildItem $csvfile).basename)”
-            # Build the QueryTables.Add command and reformat the data
-            $TxtConnector = ("TEXT;" + $csvfile)
-            $Connector = $worksheet.QueryTables.add($TxtConnector, $worksheet.Range("A1"))
-            $query = $worksheet.QueryTables.item($Connector.name)
-            $query.TextFileOtherDelimiter = $delimiter
-            $query.TextFileParseType = 1
-            $query.TextFileColumnDataTypes = , 1 * $worksheet.Cells.Columns.Count
-            $query.AdjustColumnWidth = 1
-            # Execute & delete the import query
-            $query.Refresh()
-            $query.Delete()
-            $i++
-        }
-    }
+Import-Module ImportExcel
 
-    End {
-        #Save spreadsheet
-        $workbook.saveas($xlsx)
-        Write-Host -Fore Green “File saved to $xlsx”
-        #Close Excel
-        $excel.quit()
-        Stop-Process -Name "Excel*"
-    }
-}
 # Get Subscriptions
-$subscriptions = Get-AzureRmSubscription 
-$subscriptions = Get-AzureRmSubscription -SubscriptionId 'ebe731f6-78dd-478b-ae32-d149303f3222' #GenericInfra
+$subscriptions = Get-AzureRmSubscription
 
 $resGroupsCol = @()
 $vnetsCol = @()
 $virtualmachinesCol = @()
 $disksCol = @()
+$sqlInfoCol = @()
+
 foreach ($subscription in $subscriptions) {
-    Write-Host 'Now processing Resource Groups for subscription:'$subscription.Name''
     Select-AzureRmSubscription -Subscription $subscription.Name
     $resGroups = Get-AzureRmResourceGroup | Select-Object ResourceGroupName, Location 
     foreach ($resGroup in $resGroups) {
@@ -99,10 +26,8 @@ foreach ($subscription in $subscriptions) {
         }
         $resGroupsCol += $resGroupsObject
     }
-    Write-Host 'Now processing VNETS for subscription:'$subscription.Name''
     $vnetworks = Get-AzureRmVirtualNetwork
     foreach ($vnetwork in $vnetworks) {
-        Write-Host 'Now processing VNET:'$vnetwork.Name''
         $subnets = $vnetwork.Subnets
         foreach ($subnet in $subnets) {
             $NetworkSecurityGroup = Get-AzureRmNetworkSecurityGroup | Where-Object {$_.Id -eq $subnet.NetworkSecurityGroup.Id}
@@ -122,7 +47,6 @@ foreach ($subscription in $subscriptions) {
         }
       
     }
-    Write-Host 'Now processing VMS for subscription:'$subscription.Name''
     $virtualmachines = Get-AzureRMVM -Status
     foreach ($virtualmachine in $virtualmachines) {
         $vnics = Get-AzureRmNetworkInterface |Where-Object {$_.Id -eq $VirtualMachine.NetworkProfile.NetworkInterfaces.Id} 
@@ -144,30 +68,46 @@ foreach ($subscription in $subscriptions) {
         }
         $virtualmachinesCol += $virtualmachinesObject
     }
-    Write-Host 'Now processing Disks for subscription:'$subscription.Name''
     $disks = Get-AzureRmDisk 
     foreach ($disk in $disks) {
         $disksObject = [pscustomobject][Ordered]@{
-            Subscription     = $subscription.Name        
-            Name             = $disk.Name
-            ResourceGroup    = $disk.ResourceGroupName
-            Size             = $disk.DiskSizeGB
-            Sku              = $disk.Sku.Name
-            Tier             = $disk.Sku.Tier
-            VirtualMachine   = ($disk.ManagedBy -split '/')[-1]
+            Subscription   = $subscription.Name        
+            Name           = $disk.Name
+            ResourceGroup  = $disk.ResourceGroupName
+            Size           = $disk.DiskSizeGB
+            Sku            = $disk.Sku.Name
+            Tier           = $disk.Sku.Tier
+            VirtualMachine = ($disk.ManagedBy -split '/')[-1]
         }
         $disksCol += $disksObject
-    }    
+    }
+    $sqlServers = Get-AzureRmSqlServer
+    foreach ($sqlServer in $sqlServers) {
+        $sqlDatabases = Get-AzureRmSqlDatabase -ServerName $sqlServer.ServerName -ResourceGroupName $sqlServer.ResourceGroupName | where-object {$_.DatabaseName -ne "master"}
+        foreach ($sqlDatabase in $sqlDatabases) {
+            $sqlInfoObject = [pscustomobject][Ordered]@{
+                Subscription      = $subscription.Name        
+                DatabaseName      = $sqlDatabase.DatabaseName
+                DatabaseStatus    = $sqlDatabase.Status
+                DatabaseCollation = $sqlDatabase.CollationName
+                DatabaseEdition   = $sqlDatabase.Edition
+                PricingTier       = $sqlDatabase.CurrentServiceObjectiveName
+                DTUs              = $sqlDatabase.Capacity
+                ZoneRedundant     = $sqlDatabase.ZoneRedundant
+                ServerName        = $sqlServer.ServerName
+                ResourceGroup     = $sqlServer.ResourceGroupName
+                Location          = $sqlServer.Location
+                ServerVersion     = $sqlServer.ServerVersion
+                FQDN              = $sqlServer.FullyQualifiedDomainName
+                SQLAdmin          = $sqlServer.SqlAdministratorLogin
+            }
+            $sqlInfoCol += $sqlInfoObject
+        }
+    }
 }
+# Export to Excel
+$sqlInfoCol | Export-Excel $ExcelFile -WorkSheetname 'SQLDatabase' -AutoSize -AutoFilter
+$resGroupsCol | Export-Excel $ExcelFile -WorkSheetname 'ResourceGroups' -AutoSize -AutoFilter
+$vnetsCol | Export-Excel $ExcelFile -WorkSheetname 'VNETs' -AutoSize -AutoFilter
+$disksCol | Export-Excel $ExcelFile -WorkSheetname 'Disks' -AutoSize -AutoFilter 
 
-$resGroupsPath = $Directory + "\ResourceGroups.csv"
-$resGroupsCol | Export-Csv $resGroupsPath -NoTypeInformation
-$vnetsPath = $Directory + "\VNETs.csv"
-$vnetsCol | Export-Csv $vnetsPath -NoTypeInformation 
-$virtualmachinesPath = $Directory + "\VMs.csv"
-$virtualmachinesCol | Export-Csv $virtualmachinesPath -NoTypeInformation 
-$disksPath = $Directory + "\Disks.csv"
-$disksCol | Export-Csv $disksPath -NoTypeInformation 
-
-
-ConvertCSV-ToExcel -CSVfiles @($resGroupsPath, $vnetsPath, $virtualmachinesPath,$disksPath) -output $xlsx 

@@ -3,8 +3,10 @@ $ExcelFile = "C:\AzureInventory\AzureInventory-$(get-date -f yyyy-MM-dd-hh-mm).x
 #Login-AzureRMAccount
 # Requires module - https://github.com/dfinke/ImportExcel
 # Install-Module ImportExcel
+# Install-Module MSonline
 
 Import-Module ImportExcel
+Import-Module MSOnline
 
 # Get Subscriptions
 $subscriptions = Get-AzureRmSubscription
@@ -14,10 +16,12 @@ $vnetsCol = @()
 $virtualmachinesCol = @()
 $disksCol = @()
 $sqlInfoCol = @()
+$nsgInfoCol = @()
+$roleAssignmentInfoCol = @()
 
 foreach ($subscription in $subscriptions) {
     Select-AzureRmSubscription -Subscription $subscription.Name
-    $resGroups = Get-AzureRmResourceGroup | Select-Object ResourceGroupName, Location 
+    $resGroups = Get-AzureRmResourceGroup
     foreach ($resGroup in $resGroups) {
         $resGroupsObject = [pscustomobject][Ordered]@{
             Subscription          = $subscription.Name
@@ -45,14 +49,13 @@ foreach ($subscription in $subscriptions) {
             }
             $vnetsCol += $vnetworksObject
         }
-      
     }
     $virtualmachines = Get-AzureRMVM -Status
     foreach ($virtualmachine in $virtualmachines) {
         $vnics = Get-AzureRmNetworkInterface |Where-Object {$_.Id -eq $VirtualMachine.NetworkProfile.NetworkInterfaces.Id} 
         $vmSize = Get-AzureRmVMSize -Location $virtualmachine.Location | Where-Object {$_.Name -eq $virtualmachine.HardwareProfile.VmSize}
         $virtualmachinesObject = [pscustomobject][Ordered]@{
-            Subscription     = $subscription.Name        
+            Subscription     = $subscription.Name
             Name             = $virtualmachine.Name
             ResourceGroup    = $virtualmachine.ResourceGroupName
             Size             = $virtualmachine.HardwareProfile.VmSize
@@ -71,7 +74,7 @@ foreach ($subscription in $subscriptions) {
     $disks = Get-AzureRmDisk 
     foreach ($disk in $disks) {
         $disksObject = [pscustomobject][Ordered]@{
-            Subscription   = $subscription.Name        
+            Subscription   = $subscription.Name
             Name           = $disk.Name
             ResourceGroup  = $disk.ResourceGroupName
             Size           = $disk.DiskSizeGB
@@ -86,7 +89,7 @@ foreach ($subscription in $subscriptions) {
         $sqlDatabases = Get-AzureRmSqlDatabase -ServerName $sqlServer.ServerName -ResourceGroupName $sqlServer.ResourceGroupName | where-object {$_.DatabaseName -ne "master"}
         foreach ($sqlDatabase in $sqlDatabases) {
             $sqlInfoObject = [pscustomobject][Ordered]@{
-                Subscription      = $subscription.Name        
+                Subscription      = $subscription.Name
                 DatabaseName      = $sqlDatabase.DatabaseName
                 DatabaseStatus    = $sqlDatabase.Status
                 DatabaseCollation = $sqlDatabase.CollationName
@@ -104,10 +107,60 @@ foreach ($subscription in $subscriptions) {
             $sqlInfoCol += $sqlInfoObject
         }
     }
+    $nsgs = Get-AzureRmNetworkSecurityGroup
+    foreach ($nsg in $nsgs) {
+        $securityRules = $nsg.SecurityRules
+        foreach ($securityRule in $securityRules) {
+            $nsgInfoObject = [pscustomobject][Ordered]@{
+                Subscription                         = $subscription.Name
+                NSGName                              = $nsg.Name
+                NSGResourceGroupName                 = $nsg.ResourceGroupName
+                NSGLocation                          = $nsg.Location
+                RuleName                             = $securityRule.Name
+                RuleDescription                      = $securityRule.Description
+                Protocol                             = $securityRule.Protocol
+                SourcePortRange                      = $securityRule.SourcePortRange
+                DestionationPortRange                = $securityRule.DestinationPortRange
+                SourceAddressPrefix                  = $securityRule.SourceAddressPrefix
+                DestionationAddressPrefix            = $securityRule.DestinationAddressPrefix
+                Access                               = $securityRule.Access
+                Priority                             = $securityRule.Priority
+                Direction                            = $securityRule.Direction
+                SourceApplicationSecurityGroups      = $securityRule.SoureApplicationSecurityGroups
+                DestinationApplicationSecurityGroups = $securityRule.DestionationApplicationSecurityGroups       
+            }
+            $nsgInfoCol += $nsgInfoObject
+        }
+    }
+    $roleDefinitions = Get-AzureRmRoleDefinition | Where-Object {$_.Name -eq 'Owner' -or $_.Name -eq 'Contributor'} 
+    foreach ($roleDefinition in $roleDefinitions) {
+        $roleAssignments = Get-AzureRmRoleAssignment 
+        $roleInfo = Get-AzureADUser | Where-Object {$_.DisplayName -eq $roleAssignment.DisplayName}
+        foreach ($roleAssignment in $roleAssignments) {
+            $roleInfo = Get-AzureADUser | Where-Object {$_.DisplayName -eq $roleAssignment.DisplayName}
+            $roleAssignmentInfoObject = [pscustomobject][Ordered]@{
+                Subscription = $subscription.Name
+                Name         = $roleDefinition.Name
+                Custom       = $roleDefinition.IsCustom
+                DisplayName  = $roleAssignment.DisplayName
+                Email        = $roleInfo.Mail
+                ObjectType   = $roleAssignment.ObjectType
+                Scope        = $roleAssignment.Scope
+            }
+            $roleAssignmentInfoCol += $roleAssignmentInfoObject
+        }
+    }
 }
+
 # Export to Excel
 $sqlInfoCol | Export-Excel $ExcelFile -WorkSheetname 'SQLDatabase' -AutoSize -AutoFilter
 $resGroupsCol | Export-Excel $ExcelFile -WorkSheetname 'ResourceGroups' -AutoSize -AutoFilter
 $vnetsCol | Export-Excel $ExcelFile -WorkSheetname 'VNETs' -AutoSize -AutoFilter
 $disksCol | Export-Excel $ExcelFile -WorkSheetname 'Disks' -AutoSize -AutoFilter 
+$nsgInfoCol | Export-Excel $ExcelFile -WorkSheetname 'NSGs' -AutoSize -AutoFilter
+$roleAssignmentInfoCol | Export-Excel $ExcelFile -WorkSheetname 'Roles' -AutoSize -AutoFilter
+
+
+
+
 

@@ -377,7 +377,7 @@ foreach ($adGroup in $adGroups) {
         }
     }
 
-# Ahold Azure Quota Report // created outside the base inventory report loop for easy removal if not required
+# Azure Quota Report // created outside the base inventory report loop for easy removal if not required
 $azurelocations = "westeurope","northeurope"
 
 $subscriptions = Get-AzureRmSubscription
